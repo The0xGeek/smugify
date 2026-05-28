@@ -10,48 +10,63 @@ import (
 )
 
 func main() {
-	// GET USER INPUTS FROM TERMINAL ==========
+	// cli flags ==========
 	trustFile := flag.String("trust", "", "Path to the SVG template file (used for context)")
 	attachFile := flag.String("attach", "", "Path to the file to be attached")
 	outputName := flag.String("out", "", "Custom filename for the downloaded attachment")
 
 	flag.Parse()
 
-	// CHECK USER INPUTS ==========
+	// validation ==========
 	if *attachFile == "" {
-		fmt.Fprintf(os.Stderr, "Error: The '-attach' flag is required but was not provided.\n")
-		os.Exit(1)
+		exitWithError("missing required flag: -attach")
 	}
 
 	if *outputName == "" {
 		*outputName = *attachFile
 	}
 
-	// OPEN THE FILE ==========
+	// read files ==========
 	data, err := os.ReadFile(*attachFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitWithError(fmt.Sprintf("%v", err))
 	}
 
-	// CONVERT ATTACHMENT TO BASE64 ==========
+	// basic size guard ==========
+	if len(data) == 0 {
+		exitWithError(fmt.Sprintf("open %v: attach file is empty", *attachFile))
+	}
+
+	// base64 encode ==========
 	base64String := base64.StdEncoding.EncodeToString(data)
 
-	// GENERATE FINAL SVG FILE ==========
+	// generate svg ==========
 	var outSVG string
+
 	if *trustFile == "" {
-		outSVG = utils.GenerateSVG(base64String, *outputName)
+		outSVG, err = utils.GenerateSVG(base64String, *outputName)
 	} else {
-		outSVG = utils.GenerateTrustedSVG(*trustFile, base64String, *outputName)
+		outSVG, err = utils.GenerateTrustedSVG(*trustFile, base64String, *outputName)
 	}
 
-	// WRITE OUTPUT FILE ==========
-	err = os.WriteFile("output.svg", []byte(outSVG), 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitWithError(fmt.Sprintf("%v", err))
 	}
 
-	// SUCCESS MESSAGE ==========
-	fmt.Println("Done!")
+	// write output ==========
+	outputFile := "output.svg"
+
+	err = os.WriteFile(outputFile, []byte(outSVG), 0644)
+	if err != nil {
+		exitWithError(fmt.Sprintf("Failed to write output file: %v", err))
+	}
+
+	// success ==========
+	fmt.Printf("Done! Output written to %s\n", outputFile)
+}
+
+// centeralize error handling ==========
+func exitWithError(msg string) {
+	fmt.Fprintln(os.Stderr, "Error:", msg)
+	os.Exit(1)
 }
