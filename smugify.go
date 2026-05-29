@@ -14,6 +14,12 @@ func main() {
 	trustFile := flag.String("trust", "", "Path to the SVG template file (used for context)")
 	attachFile := flag.String("attach", "", "Path to the file to be attached")
 	outputName := flag.String("out", "", "Custom filename for the downloaded attachment")
+	// obfuscation flags
+	obfuscateJS := flag.Bool("obfuscate", false, "Enable JavaScript obfuscation pipeline")
+	hexEscape := flag.Bool("hex-escape", false, "Convert string literals to hex escape sequences")
+	removeComments := flag.Bool("remove-comments", false, "Strip single-line and multi-line comments")
+	minifyCode := flag.Bool("minify", false, "Minify JavaScript output")
+	advanced := flag.Bool("advanced", false, "Enable advanced multi-layer encoding (eval-based loader)")
 
 	flag.Parse()
 
@@ -24,6 +30,25 @@ func main() {
 
 	if *outputName == "" {
 		*outputName = *attachFile
+	}
+
+	var option utils.Options
+	if *obfuscateJS {
+		option = utils.Options{
+			EncodeStrings: true,
+			HexEscape: *hexEscape,
+			RemoveComments: *removeComments,
+			MinifyCode: *minifyCode,
+			AdvancedEncoding: *advanced,
+		}
+	} else {
+		option = utils.Options{
+			EncodeStrings: false,
+			HexEscape: false,
+			RemoveComments: false,
+			MinifyCode: false,
+			AdvancedEncoding: false,
+		}
 	}
 
 	// read files ==========
@@ -44,9 +69,9 @@ func main() {
 	var outSVG string
 
 	if *trustFile == "" {
-		outSVG, err = utils.GenerateSVG(base64String, *outputName)
+		outSVG, err = utils.GenerateSVG(base64String, *outputName, option)
 	} else {
-		outSVG, err = utils.GenerateTrustedSVG(*trustFile, base64String, *outputName)
+		outSVG, err = utils.GenerateTrustedSVG(*trustFile, base64String, *outputName, option)
 	}
 
 	if err != nil {
